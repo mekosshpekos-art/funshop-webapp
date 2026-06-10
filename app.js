@@ -72,7 +72,7 @@ function initTelegram() {
     console.warn('Telegram WebApp SDK не найден. Работаем в браузерном режиме.');
     return;
   }
-  tg.ready();
+  window.Telegram.WebApp.ready();
   tg.expand();
 
   try {
@@ -424,12 +424,23 @@ async function submitOrder() {
     delivery_price: state.delivery.price,
     address,
     comment,
+    user: state.user,
   };
 
-  if (tg && tg.sendData) {
-    // Отправляем через Telegram WebApp SDK → бот получит через web_app_data
-    tg.sendData(JSON.stringify(payload));
-    // После sendData() страница закроется автоматически
+  console.log("WebApp sendData fired, payload:", payload);
+  console.log(payload);
+
+  if (window.Telegram?.WebApp) {
+    try {
+      window.Telegram.WebApp.sendData(JSON.stringify(payload));
+      console.log("Telegram.WebApp.sendData executed successfully");
+    } catch (err) {
+      console.error("Error in Telegram.WebApp.sendData:", err);
+    }
+    // Показываем экран успешного заказа и очищаем корзину
+    state.cart = [];
+    closeModal('cart-modal');
+    showSuccessScreen();
   } else if (API_BASE) {
     // Фолбэк: отправка через REST API (если бэкенд доступен)
     try {
