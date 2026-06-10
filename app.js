@@ -1,0 +1,593 @@
+/**
+ * app.js — FunShop WebApp Logic
+ * Полностью независим от бота. Работает через Telegram WebApp API.
+ * Данные каталога хранятся в data.js (статический JSON).
+ * Заказ отправляется через Telegram.sendData().
+ */
+
+/* ═══════════════════════════════════════════════════════
+   КОНФИГУРАЦИЯ (URL бэкенда — если используется)
+   Если WebApp на GitHub Pages, данные берутся из CATALOG ниже
+═══════════════════════════════════════════════════════ */
+const API_BASE = typeof BACKEND_URL !== 'undefined' ? BACKEND_URL : null;
+
+/* ═══════════════════════════════════════════════════════
+   ВСТРОЕННЫЙ КАТАЛОГ (перенесён из старого проекта)
+   Если есть бэкенд (API_BASE), данные загружаются оттуда.
+   Иначе — используется этот статический каталог.
+═══════════════════════════════════════════════════════ */
+const STATIC_CATALOG = {
+  categories: [
+    { id: 1, name: "Снюс",       slug: "snus"        },
+    { id: 2, name: "Расходники",  slug: "rashodniki"  },
+    { id: 3, name: "Кальян",     slug: "hookah"      },
+    { id: 4, name: "Одноразки",   slug: "disposables" },
+    { id: 5, name: "Поды",        slug: "pods"        },
+  ],
+  products: [
+    // ── Снюс ─────────────────────────────────────────────
+    { id: 1,  category_id: 1, name: "Snus Cuba Black Cherry",   price: 4500, image_url: "", description: "Снюс Cuba с ароматом чёрной вишни" },
+    { id: 2,  category_id: 1, name: "Snus Pablo Ice Cold",      price: 4500, image_url: "", description: "Снюс Pablo с ледяным эффектом"     },
+    { id: 3,  category_id: 1, name: "Snus Velo Freeze X-Strong",price: 4500, image_url: "", description: "Снюс Velo максимальной крепости"    },
+    { id: 4,  category_id: 1, name: "Snus Iceberg Watermelon",  price: 4500, image_url: "", description: "Снюс Iceberg со вкусом арбуза"      },
+    // ── Расходники ─────────────────────────────────────────
+    { id: 5,  category_id: 2, name: "Испаритель B Series Hero/Boost", price: 2500, image_url: "", description: "Испаритель серии B для Hero/Boost" },
+    // ── Кальян ───────────────────────────────────────────
+    { id: 6,  category_id: 3, name: "Кальян Premium Hookah",    price: 10000, image_url: "", description: "Премиальный кальян для ценителей"  },
+    // ── Одноразки ─────────────────────────────────────────
+    // (добавьте товары при необходимости)
+    // ── Поды ──────────────────────────────────────────────
+    // (добавьте товары при необходимости)
+  ]
+};
+
+/* ═══════════════════════════════════════════════════════
+   ГЛОБАЛЬНОЕ СОСТОЯНИЕ
+═══════════════════════════════════════════════════════ */
+let state = {
+  categories: [],
+  products:   [],
+  cart:       [],            // [{product_id, name, price, quantity}]
+  activeCategory: 'all',
+  searchQuery: '',
+  user: null,
+  userRole: 'client',        // 'admin' | 'manager' | 'client'
+  delivery: {
+    type:  'city',
+    price: 700,
+  },
+  isSubmitting: false,
+  // ID персонала (загружается из /api/config или задаётся здесь)
+  adminIds:   [8848228870],
+  managerIds: [8965924831, 7995137347],
+};
+
+/* ═══════════════════════════════════════════════════════
+   TELEGRAM WEBAPP SDK
+═══════════════════════════════════════════════════════ */
+const tg = window.Telegram?.WebApp;
+
+function initTelegram() {
+  if (!tg) {
+    console.warn('Telegram WebApp SDK не найден. Работаем в браузерном режиме.');
+    return;
+  }
+  tg.ready();
+  tg.expand();
+
+  try {
+    tg.setHeaderColor('#0e1621');
+    tg.setBackgroundColor('#0e1621');
+  } catch (e) {}
+
+  if (tg.initDataUnsafe?.user) {
+    state.user = tg.initDataUnsafe.user;
+  }
+}
+
+function triggerHaptic(type = 'light') {
+  try {
+    if (!tg?.HapticFeedback) return;
+    if (type === 'success') tg.HapticFeedback.notificationOccurred('success');
+    else if (type === 'warning') tg.HapticFeedback.notificationOccurred('warning');
+    else tg.HapticFeedback.impactOccurred(type);
+  } catch (e) {}
+}
+
+/* ═══════════════════════════════════════════════════════
+   ОПРЕДЕЛЕНИЕ РОЛИ ПОЛЬЗОВАТЕЛЯ
+═══════════════════════════════════════════════════════ */
+function detectRole() {
+  if (!state.user) return;
+  const uid = state.user.id;
+  if (state.adminIds.includes(uid)) {
+    state.userRole = 'admin';
+  } else if (state.managerIds.includes(uid)) {
+    state.userRole = 'manager';
+  } else {
+    state.userRole = 'client';
+  }
+}
+
+function isStaff() {
+  return state.userRole === 'admin' || state.userRole === 'manager';
+}
+
+/* ═══════════════════════════════════════════════════════
+   ЗАГРУЗКА ДАННЫХ
+═══════════════════════════════════════════════════════ */
+async function loadCatalog() {
+  if (API_BASE) {
+    // Если есть бэкенд — загружаем оттуда
+    try {
+      const [catRes, prodRes] = await Promise.all([
+        fetch(`${API_BASE}/api/categories`),
+        fetch(`${API_BASE}/api/products`),
+      ]);
+      state.categories = await catRes.json();
+      state.products   = await prodRes.json();
+      return;
+    } catch (e) {
+      console.warn('Ошибка загрузки с бэкенда, используем встроенный каталог:', e);
+    }
+  }
+  // Статический каталог
+  state.categories = STATIC_CATALOG.categories;
+  state.products   = STATIC_CATALOG.products;
+}
+
+async function loadConfig() {
+  if (!API_BASE) return;
+  try {
+    const res  = await fetch(`${API_BASE}/api/config`);
+    const data = await res.json();
+    if (data.admin_ids)   state.adminIds   = data.admin_ids;
+    if (data.manager_ids) state.managerIds = data.manager_ids;
+  } catch (e) {
+    console.warn('Конфиг не загружен, используем встроенные ID');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   РЕНДЕРИНГ
+═══════════════════════════════════════════════════════ */
+function renderHeader() {
+  const nameEl = document.getElementById('user-name');
+  nameEl.textContent = state.user?.first_name || 'Гость';
+
+  const adminBtn = document.getElementById('admin-btn');
+  if (isStaff()) {
+    adminBtn.classList.remove('hidden');
+  }
+}
+
+function renderCategories() {
+  const container = document.getElementById('categories-list');
+  // Оставляем кнопку «Все»
+  const allBtn = container.querySelector('[data-id="all"]');
+  container.innerHTML = '';
+  container.appendChild(allBtn);
+
+  state.categories.forEach(cat => {
+    const btn = document.createElement('button');
+    btn.className = 'cat-btn';
+    btn.dataset.id = cat.id;
+    btn.textContent = cat.name;
+    btn.onclick = () => selectCategory(cat.id, btn);
+    container.appendChild(btn);
+  });
+
+  // Заполняем select в форме добавления товара
+  const select = document.getElementById('new-category');
+  if (select) {
+    select.innerHTML = '<option value="" disabled selected>Выберите категорию...</option>';
+    state.categories.forEach(cat => {
+      const opt = document.createElement('option');
+      opt.value = cat.id;
+      opt.textContent = cat.name;
+      select.appendChild(opt);
+    });
+  }
+}
+
+function getFilteredProducts() {
+  return state.products.filter(p => {
+    const matchCat = state.activeCategory === 'all' || p.category_id === state.activeCategory;
+    const matchSearch = p.name.toLowerCase().includes(state.searchQuery.toLowerCase());
+    return matchCat && matchSearch;
+  });
+}
+
+function renderProducts() {
+  const grid = document.getElementById('products-grid');
+  const countEl = document.getElementById('product-count');
+  const filtered = getFilteredProducts();
+
+  countEl.textContent = `${filtered.length} товаров`;
+
+  if (filtered.length === 0) {
+    grid.innerHTML = `
+      <div class="empty-state">
+        <p>Товары не найдены 🔍</p>
+      </div>`;
+    return;
+  }
+
+  grid.innerHTML = filtered.map(p => buildProductCard(p)).join('');
+}
+
+function buildProductCard(p) {
+  const qty = getItemQty(p.id);
+  const imgHtml = p.image_url
+    ? `<img class="product-img" src="${escHtml(p.image_url)}" alt="${escHtml(p.name)}" onerror="this.parentElement.innerHTML=noImageHtml()" loading="lazy" />`
+    : `<div class="product-img-placeholder"><span>📦</span><span>FunShop Premium</span></div>`;
+
+  const actionHtml = qty > 0
+    ? `<div class="qty-counter">
+         <button class="qty-btn" onclick="updateQty(${p.id}, -1)">−</button>
+         <span class="qty-value">${qty}</span>
+         <button class="qty-btn" onclick="updateQty(${p.id}, 1)">+</button>
+       </div>`
+    : `<button class="btn-add" onclick="addToCart(${p.id})">+</button>`;
+
+  return `
+    <div class="product-card" id="card-${p.id}">
+      <div class="product-img-wrap">${imgHtml}</div>
+      <div class="product-body">
+        <div>
+          <h3 class="product-name">${escHtml(p.name)}</h3>
+          <p class="product-quality">Гарантия качества 100%</p>
+        </div>
+        <div class="product-footer">
+          <span class="product-price">${formatPrice(p.price)}</span>
+          ${actionHtml}
+        </div>
+      </div>
+    </div>`;
+}
+
+function noImageHtml() {
+  return `<div class="product-img-placeholder"><span>📦</span><span>FunShop Premium</span></div>`;
+}
+
+/* ═══════════════════════════════════════════════════════
+   КОРЗИНА
+═══════════════════════════════════════════════════════ */
+function getItemQty(productId) {
+  return state.cart.find(i => i.product_id === productId)?.quantity || 0;
+}
+
+function addToCart(productId) {
+  const product = state.products.find(p => p.id === productId);
+  if (!product) return;
+
+  const existing = state.cart.find(i => i.product_id === productId);
+  if (existing) {
+    existing.quantity += 1;
+  } else {
+    state.cart.push({ product_id: productId, name: product.name, price: product.price, quantity: 1 });
+  }
+  triggerHaptic('success');
+  updateCartFab();
+  // Перерисовываем только карточку
+  const card = document.getElementById(`card-${productId}`);
+  if (card) {
+    const footer = card.querySelector('.product-footer');
+    if (footer) {
+      footer.querySelector('.btn-add, .qty-counter').outerHTML = buildProductCard(product).match(/(<div class="qty-counter">[\s\S]*?<\/div>|<button class="btn-add"[^>]*>[^<]*<\/button>)/)?.[0] || '';
+      // Перерисовываем карточку через обновление сетки
+      renderProducts();
+    }
+  }
+}
+
+function updateQty(productId, delta) {
+  const item = state.cart.find(i => i.product_id === productId);
+  if (!item) return;
+  item.quantity += delta;
+  if (item.quantity <= 0) {
+    state.cart = state.cart.filter(i => i.product_id !== productId);
+  }
+  triggerHaptic('light');
+  updateCartFab();
+  renderProducts();
+
+  // Если открыта корзина — обновляем её
+  if (!document.getElementById('cart-modal').classList.contains('hidden')) {
+    renderCartItems();
+    updateCartTotals();
+    updateCheckoutBtn();
+  }
+}
+
+function removeFromCart(productId) {
+  state.cart = state.cart.filter(i => i.product_id !== productId);
+  triggerHaptic('warning');
+  updateCartFab();
+  renderProducts();
+  renderCartItems();
+  updateCartTotals();
+  updateCheckoutBtn();
+}
+
+function getCartSubtotal() {
+  return state.cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
+}
+
+function getTotalCount() {
+  return state.cart.reduce((sum, i) => sum + i.quantity, 0);
+}
+
+function updateCartFab() {
+  const fab = document.getElementById('cart-fab');
+  const count = getTotalCount();
+  if (count === 0) {
+    fab.classList.add('hidden');
+    return;
+  }
+  fab.classList.remove('hidden');
+  document.getElementById('cart-count-text').textContent = `${count} ${pluralizeGoods(count)}`;
+  document.getElementById('cart-fab-price').textContent = formatPrice(getCartSubtotal());
+}
+
+/* ═══════════════════════════════════════════════════════
+   КОРЗИНА — МОДАЛКА
+═══════════════════════════════════════════════════════ */
+function openCart() {
+  renderCartItems();
+  updateCartTotals();
+  updateCheckoutBtn();
+  openModal('cart-modal');
+}
+
+function renderCartItems() {
+  const container = document.getElementById('cart-items-list');
+  if (state.cart.length === 0) {
+    container.innerHTML = '<p style="text-align:center;color:var(--muted);font-size:12px;padding:20px 0">Корзина пуста</p>';
+    return;
+  }
+  container.innerHTML = state.cart.map(item => `
+    <div class="cart-item">
+      <div class="cart-item-info">
+        <div class="cart-item-name">${escHtml(item.name)}</div>
+        <div class="cart-item-price">${formatPrice(item.price)} / шт</div>
+      </div>
+      <div class="cart-item-actions">
+        <div class="qty-counter">
+          <button class="qty-btn" onclick="updateQty(${item.product_id},-1)">−</button>
+          <span class="qty-value">${item.quantity}</span>
+          <button class="qty-btn" onclick="updateQty(${item.product_id},1)">+</button>
+        </div>
+        <button class="btn-remove" onclick="removeFromCart(${item.product_id})">🗑</button>
+      </div>
+    </div>`).join('');
+}
+
+function selectDelivery(type, price) {
+  state.delivery.type  = type;
+  state.delivery.price = price;
+
+  document.getElementById('del-city').classList.remove('active-city');
+  document.getElementById('del-suburb').classList.remove('active-suburb');
+
+  if (type === 'city')   document.getElementById('del-city').classList.add('active-city');
+  if (type === 'suburb') document.getElementById('del-suburb').classList.add('active-suburb');
+
+  updateCartTotals();
+}
+
+function updateCartTotals() {
+  const subtotal = getCartSubtotal();
+  document.getElementById('total-items-price').textContent    = formatPrice(subtotal);
+  document.getElementById('total-delivery-price').textContent = formatPrice(state.delivery.price);
+  document.getElementById('total-final-price').textContent    = formatPrice(subtotal + state.delivery.price);
+}
+
+function updateCheckoutBtn() {
+  const address = document.getElementById('delivery-address')?.value?.trim();
+  const btn = document.getElementById('checkout-btn');
+  if (!btn) return;
+  if (address && state.cart.length > 0) {
+    btn.classList.remove('disabled');
+  } else {
+    btn.classList.add('disabled');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   ОФОРМЛЕНИЕ ЗАКАЗА
+═══════════════════════════════════════════════════════ */
+async function submitOrder() {
+  if (state.isSubmitting) return;
+  const btn = document.getElementById('checkout-btn');
+  if (btn?.classList.contains('disabled')) return;
+
+  const address = document.getElementById('delivery-address').value.trim();
+  const comment = document.getElementById('delivery-comment').value.trim();
+
+  if (!address) {
+    alert('Укажите адрес доставки!');
+    return;
+  }
+  if (state.cart.length === 0) {
+    alert('Корзина пуста!');
+    return;
+  }
+
+  state.isSubmitting = true;
+  if (btn) { btn.textContent = 'Оформление...'; btn.classList.add('disabled'); }
+
+  const payload = {
+    type: 'order',
+    items: state.cart.map(i => ({ product_id: i.product_id, quantity: i.quantity })),
+    delivery_type:  state.delivery.type,
+    delivery_price: state.delivery.price,
+    address,
+    comment,
+  };
+
+  if (tg && tg.sendData) {
+    // Отправляем через Telegram WebApp SDK → бот получит через web_app_data
+    tg.sendData(JSON.stringify(payload));
+    // После sendData() страница закроется автоматически
+  } else if (API_BASE) {
+    // Фолбэк: отправка через REST API (если бэкенд доступен)
+    try {
+      const res = await fetch(`${API_BASE}/api/orders`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, initData: tg?.initData || '' }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        state.cart = [];
+        closeModal('cart-modal');
+        showSuccessScreen();
+      } else {
+        alert('Ошибка: ' + (data.detail || 'Неизвестная ошибка'));
+      }
+    } catch (e) {
+      alert('Ошибка отправки заказа: ' + e.message);
+    }
+  } else {
+    // Браузерный режим — просто показываем успех
+    state.cart = [];
+    closeModal('cart-modal');
+    showSuccessScreen();
+  }
+
+  state.isSubmitting = false;
+  if (btn) { btn.textContent = 'Подтвердить заказ'; updateCheckoutBtn(); }
+}
+
+function showSuccessScreen() {
+  triggerHaptic('success');
+  updateCartFab();
+  openModal('success-modal');
+}
+
+/* ═══════════════════════════════════════════════════════
+   ПАНЕЛЬ ADMIN
+═══════════════════════════════════════════════════════ */
+function openAdminPanel() {
+  if (!isStaff()) return;
+  openModal('admin-modal');
+}
+
+async function submitNewProduct(event) {
+  event.preventDefault();
+  const categoryId = parseInt(document.getElementById('new-category').value);
+  const name       = document.getElementById('new-name').value.trim();
+  const price      = parseFloat(document.getElementById('new-price').value);
+  const imageUrl   = document.getElementById('new-image').value.trim();
+  const desc       = document.getElementById('new-desc').value.trim();
+
+  if (!name || !price || !categoryId) return;
+
+  if (API_BASE) {
+    try {
+      const res = await fetch(`${API_BASE}/api/products`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          initData: tg?.initData || '',
+          category_id: categoryId,
+          name, price, image_url: imageUrl, description: desc,
+        }),
+      });
+      if (!res.ok) throw new Error('Access denied');
+      const newProd = await res.json();
+      state.products.push(newProd);
+    } catch (e) {
+      alert('Ошибка добавления товара: ' + e.message);
+      return;
+    }
+  } else {
+    // Локально добавляем в каталог (только для сессии)
+    const newId = Math.max(...state.products.map(p => p.id), 0) + 1;
+    state.products.push({ id: newId, category_id: categoryId, name, price, image_url: imageUrl, description: desc });
+  }
+
+  // Сбрасываем форму
+  document.getElementById('admin-form').reset();
+  closeModal('admin-modal');
+  renderProducts();
+  triggerHaptic('success');
+}
+
+/* ═══════════════════════════════════════════════════════
+   ФИЛЬТРЫ
+═══════════════════════════════════════════════════════ */
+function selectCategory(catId, btn) {
+  state.activeCategory = catId === 'all' ? 'all' : parseInt(catId);
+  document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderProducts();
+}
+
+function filterProducts() {
+  state.searchQuery = document.getElementById('search-input').value;
+  renderProducts();
+}
+
+/* ═══════════════════════════════════════════════════════
+   МОДАЛЬНЫЕ ОКНА
+═══════════════════════════════════════════════════════ */
+function openModal(id) {
+  document.getElementById(id).classList.remove('hidden');
+}
+
+function closeModal(id) {
+  document.getElementById(id).classList.add('hidden');
+}
+
+function closeOnBackdrop(event, modalId) {
+  if (event.target.id === modalId) closeModal(modalId);
+}
+
+function closeApp() {
+  if (tg) tg.close();
+  else closeModal('success-modal');
+}
+
+/* ═══════════════════════════════════════════════════════
+   УТИЛИТЫ
+═══════════════════════════════════════════════════════ */
+function formatPrice(val) {
+  return parseFloat(val).toLocaleString('ru-RU') + ' ₸';
+}
+
+function pluralizeGoods(n) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return 'товар';
+  if ([2,3,4].includes(m10) && ![12,13,14].includes(m100)) return 'товара';
+  return 'товаров';
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/* ═══════════════════════════════════════════════════════
+   ИНИЦИАЛИЗАЦИЯ
+═══════════════════════════════════════════════════════ */
+async function init() {
+  initTelegram();
+  await loadConfig();
+  detectRole();
+  await loadCatalog();
+
+  renderHeader();
+  renderCategories();
+  renderProducts();
+  updateCartFab();
+
+  // Инициализируем доставку
+  selectDelivery('city', 700);
+}
+
+document.addEventListener('DOMContentLoaded', init);

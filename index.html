@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="description" content="FunShop — премиальный магазин кальянов, снюса, одноразок и подов" />
+  <title>FunShop Premium</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+
+  <!-- Telegram WebApp SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════
+     ПРИЛОЖЕНИЕ
+═══════════════════════════════════════════════════ -->
+<div id="app">
+
+  <!-- ШАПКА -->
+  <header class="header" id="main-header">
+    <div class="header-brand">
+      <div class="header-logo">FS</div>
+      <div>
+        <h1 class="header-title">FunShop</h1>
+        <p class="header-subtitle">PREMIUM SELECTION</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <!-- Кнопка Admin Panel (только для staff) -->
+      <button id="admin-btn" class="btn-icon btn-purple hidden" onclick="openAdminPanel()" title="Панель управления">⚙️</button>
+      <!-- Имя пользователя -->
+      <div class="user-badge">
+        <span class="user-dot"></span>
+        <span id="user-name">Гость</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ПРОМО-БАННЕР -->
+  <div class="promo-banner">
+    <div class="promo-overlay"></div>
+    <div class="promo-content">
+      <span class="promo-tag">АКЦИЯ</span>
+      <h2 class="promo-title">Привозим премиальные вкусы прямо на дом!</h2>
+      <p class="promo-sub">Быстрая доставка по городу и за город</p>
+    </div>
+  </div>
+
+  <!-- ПОИСК -->
+  <div class="search-wrap">
+    <span class="search-icon">🔍</span>
+    <input
+      type="text"
+      id="search-input"
+      class="search-input"
+      placeholder="Поиск товаров..."
+      oninput="filterProducts()"
+    />
+  </div>
+
+  <!-- КАТЕГОРИИ -->
+  <div class="categories" id="categories-list">
+    <button class="cat-btn active" data-id="all" onclick="selectCategory('all', this)">Все категории</button>
+    <!-- динамически добавляются -->
+  </div>
+
+  <!-- ЗАГОЛОВОК КАТАЛОГА -->
+  <div class="catalog-header">
+    <h2 class="catalog-title">Ассортимент магазина</h2>
+    <span class="catalog-count" id="product-count">0 товаров</span>
+  </div>
+
+  <!-- КАТАЛОГ ТОВАРОВ -->
+  <div class="products-grid" id="products-grid">
+    <!-- Скелетон загрузки -->
+    <div class="skeleton-card"></div>
+    <div class="skeleton-card"></div>
+    <div class="skeleton-card"></div>
+    <div class="skeleton-card"></div>
+  </div>
+
+  <!-- ПЛАВАЮЩАЯ КНОПКА КОРЗИНЫ -->
+  <div class="cart-fab hidden" id="cart-fab" onclick="openCart()">
+    <div class="cart-fab-left">
+      <span>🛒</span>
+      <span id="cart-count-text">0 товаров</span>
+    </div>
+    <span class="cart-fab-price" id="cart-fab-price">0 ₸</span>
+  </div>
+
+</div><!-- #app -->
+
+
+<!-- ═══════════════════════════════════════════════════
+     МОДАЛКА: КОРЗИНА И ОФОРМЛЕНИЕ ЗАКАЗА
+═══════════════════════════════════════════════════ -->
+<div class="modal-overlay hidden" id="cart-modal" onclick="closeOnBackdrop(event,'cart-modal')">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <h2 class="modal-title">🛒 Корзина заказа</h2>
+      <button class="modal-close" onclick="closeModal('cart-modal')">✕</button>
+    </div>
+
+    <!-- Список товаров в корзине -->
+    <div class="cart-items" id="cart-items-list"></div>
+
+    <!-- Способ доставки -->
+    <div class="field-group">
+      <label class="field-label">Способ доставки</label>
+      <div class="delivery-grid">
+        <div class="delivery-card active" id="del-city" onclick="selectDelivery('city', 700)">
+          <span class="delivery-name">🏙️ По городу</span>
+          <span class="delivery-price cyan">700 ₸</span>
+        </div>
+        <div class="delivery-card" id="del-suburb" onclick="selectDelivery('suburb', 1200)">
+          <span class="delivery-name">🚗 За город</span>
+          <span class="delivery-price purple">1 200 ₸</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Адрес -->
+    <div class="field-group">
+      <label class="field-label">Адрес доставки *</label>
+      <input
+        type="text"
+        id="delivery-address"
+        class="field-input"
+        placeholder="Город, улица, дом, квартира"
+        oninput="updateCheckoutBtn()"
+      />
+    </div>
+
+    <!-- Комментарий -->
+    <div class="field-group">
+      <label class="field-label">Комментарий к заказу</label>
+      <textarea
+        id="delivery-comment"
+        class="field-input field-textarea"
+        placeholder="Уточнения для менеджера..."
+        rows="2"
+      ></textarea>
+    </div>
+
+    <!-- Итог -->
+    <div class="order-total">
+      <div class="total-row">
+        <span class="total-label">Товары:</span>
+        <span id="total-items-price">0 ₸</span>
+      </div>
+      <div class="total-row">
+        <span class="total-label">Доставка:</span>
+        <span id="total-delivery-price">700 ₸</span>
+      </div>
+      <div class="total-row total-final">
+        <span>Итого к оплате:</span>
+        <span id="total-final-price" class="total-amount">0 ₸</span>
+      </div>
+    </div>
+
+    <!-- Кнопка оформления -->
+    <button class="btn-checkout disabled" id="checkout-btn" onclick="submitOrder()">
+      Подтвердить заказ
+    </button>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════
+     МОДАЛКА: УСПЕШНЫЙ ЗАКАЗ
+═══════════════════════════════════════════════════ -->
+<div class="modal-overlay hidden" id="success-modal">
+  <div class="success-screen">
+    <div class="success-icon-wrap">
+      <div class="success-glow"></div>
+      <div class="success-icon">✅</div>
+    </div>
+    <h2 class="success-title">Заказ оформлен!</h2>
+    <p class="success-sub">
+      Сводка заказа отправлена менеджеру.<br>
+      Мы свяжемся с вами для подтверждения доставки. 🚀
+    </p>
+    <button class="btn-primary" onclick="closeApp()">Закрыть магазин</button>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════
+     МОДАЛКА: ПАНЕЛЬ ADMIN/MANAGER
+═══════════════════════════════════════════════════ -->
+<div class="modal-overlay hidden" id="admin-modal" onclick="closeOnBackdrop(event,'admin-modal')">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <h2 class="modal-title">⚙️ Добавить товар</h2>
+      <button class="modal-close" onclick="closeModal('admin-modal')">✕</button>
+    </div>
+
+    <form id="admin-form" onsubmit="submitNewProduct(event)" class="admin-form">
+      <div class="field-group">
+        <label class="field-label">Категория</label>
+        <select id="new-category" class="field-input field-select" required>
+          <option value="" disabled selected>Выберите категорию...</option>
+        </select>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label">Название товара</label>
+        <input type="text" id="new-name" class="field-input" placeholder="Введите название" required />
+      </div>
+
+      <div class="field-group">
+        <label class="field-label">Стоимость (₸)</label>
+        <input type="number" id="new-price" class="field-input" placeholder="Введите цену" min="1" required />
+      </div>
+
+      <div class="field-group">
+        <label class="field-label">URL изображения (необязательно)</label>
+        <input type="url" id="new-image" class="field-input" placeholder="https://..." />
+      </div>
+
+      <div class="field-group">
+        <label class="field-label">Описание (необязательно)</label>
+        <textarea id="new-desc" class="field-input field-textarea" placeholder="Описание товара..." rows="2"></textarea>
+      </div>
+
+      <div class="form-actions">
+        <button type="button" class="btn-secondary" onclick="closeModal('admin-modal')">Отмена</button>
+        <button type="submit" class="btn-primary">Добавить товар</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
