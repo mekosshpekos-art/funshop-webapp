@@ -9,7 +9,7 @@
    КОНФИГУРАЦИЯ (URL бэкенда — если используется)
    Если WebApp на GitHub Pages, данные берутся из CATALOG ниже
 ═══════════════════════════════════════════════════════ */
-const API_BASE = typeof BACKEND_URL !== 'undefined' ? BACKEND_URL : null;
+const API_BASE = "https://prevail-blah-shrubbery.ngrok-free.dev";
 
 /* ═══════════════════════════════════════════════════════
    ВСТРОЕННЫЙ КАТАЛОГ (перенесён из старого проекта)
