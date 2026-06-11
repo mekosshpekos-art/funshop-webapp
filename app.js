@@ -138,14 +138,6 @@ async function loadConfig() {
     if (data.admin_ids)   state.adminIds   = data.admin_ids;
     if (data.manager_ids) state.managerIds = data.manager_ids;
 
-    // Подставляем username бота поддержки в кнопки
-    if (data.support_bot_username) {
-      const supportUrl = `https://t.me/${data.support_bot_username}`;
-      const supportBtnHeader = document.getElementById('support-btn');
-      const supportFab       = document.getElementById('support-fab');
-      if (supportBtnHeader) supportBtnHeader.href = supportUrl;
-      if (supportFab)       supportFab.href       = supportUrl;
-    }
   } catch (e) {
     console.warn('Конфиг не загружен, используем встроенные ID');
   }
@@ -530,7 +522,29 @@ function initPhotoUpload() {
 
     const reader = new FileReader();
     reader.onload = function(event) {
-      setUploadPreview(event.target.result);
+      const img = new Image();
+      img.onload = function() {
+        const maxDim = 800;
+        let width = img.width;
+        let height = img.height;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+        setUploadPreview(compressedBase64);
+      };
+      img.src = event.target.result;
     };
     reader.readAsDataURL(file);
   });
