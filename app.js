@@ -2,20 +2,20 @@
  * app.js — FunShop WebApp Logic
  * Полностью независим от бота. Работает через Telegram WebApp API.
  * Данные каталога хранятся в data.js (статический JSON).
- * Заказ отправляется через Telegram.sendData().
+ * Заказ отправляется через Telegram.sendData() или REST API.
  */
 
 /* ═══════════════════════════════════════════════════════
    КОНФИГУРАЦИЯ (URL бэкенда — если используется)
    Если WebApp на GitHub Pages, данные берутся из CATALOG ниже
-═══════════════════════════════════════════════════════ */
+   ═══════════════════════════════════════════════════════ */
 const API_BASE = "https://prevail-blah-shrubbery.ngrok-free.dev";
 
 /* ═══════════════════════════════════════════════════════
    ВСТРОЕННЫЙ КАТАЛОГ (перенесён из старого проекта)
    Если есть бэкенд (API_BASE), данные загружаются оттуда.
    Иначе — используется этот статический каталог.
-═══════════════════════════════════════════════════════ */
+   ═══════════════════════════════════════════════════════ */
 const STATIC_CATALOG = {
   categories: [
     { id: 1, name: "Снюс",       slug: "snus"        },
@@ -34,16 +34,12 @@ const STATIC_CATALOG = {
     { id: 5,  category_id: 2, name: "Испаритель B Series Hero/Boost", price: 2500, image_url: "", description: "Испаритель серии B для Hero/Boost" },
     // ── Кальян ───────────────────────────────────────────
     { id: 6,  category_id: 3, name: "Кальян Premium Hookah",    price: 10000, image_url: "", description: "Премиальный кальян для ценителей"  },
-    // ── Одноразки ─────────────────────────────────────────
-    // (добавьте товары при необходимости)
-    // ── Поды ──────────────────────────────────────────────
-    // (добавьте товары при необходимости)
   ]
 };
 
 /* ═══════════════════════════════════════════════════════
    ГЛОБАЛЬНОЕ СОСТОЯНИЕ
-═══════════════════════════════════════════════════════ */
+   ═══════════════════════════════════════════════════════ */
 let state = {
   categories: [],
   products:   [],
@@ -64,7 +60,7 @@ let state = {
 
 /* ═══════════════════════════════════════════════════════
    TELEGRAM WEBAPP SDK
-═══════════════════════════════════════════════════════ */
+   ═══════════════════════════════════════════════════════ */
 const tg = window.Telegram?.WebApp;
 
 function initTelegram() {
@@ -96,7 +92,7 @@ function triggerHaptic(type = 'light') {
 
 /* ═══════════════════════════════════════════════════════
    ОПРЕДЕЛЕНИЕ РОЛИ ПОЛЬЗОВАТЕЛЯ
-═══════════════════════════════════════════════════════ */
+   ═══════════════════════════════════════════════════════ */
 function detectRole() {
   if (!state.user) return;
   const uid = state.user.id;
@@ -115,10 +111,9 @@ function isStaff() {
 
 /* ═══════════════════════════════════════════════════════
    ЗАГРУЗКА ДАННЫХ
-═══════════════════════════════════════════════════════ */
+   ═══════════════════════════════════════════════════════ */
 async function loadCatalog() {
   if (API_BASE) {
-    // Если есть бэкенд — загружаем оттуда
     try {
       const [catRes, prodRes] = await Promise.all([
         fetch(`${API_BASE}/api/categories`),
@@ -131,7 +126,6 @@ async function loadCatalog() {
       console.warn('Ошибка загрузки с бэкенда, используем встроенный каталог:', e);
     }
   }
-  // Статический каталог
   state.categories = STATIC_CATALOG.categories;
   state.products   = STATIC_CATALOG.products;
 }
@@ -150,7 +144,7 @@ async function loadConfig() {
 
 /* ═══════════════════════════════════════════════════════
    РЕНДЕРИНГ
-═══════════════════════════════════════════════════════ */
+   ═══════════════════════════════════════════════════════ */
 function renderHeader() {
   const nameEl = document.getElementById('user-name');
   nameEl.textContent = state.user?.first_name || 'Гость';
@@ -163,7 +157,6 @@ function renderHeader() {
 
 function renderCategories() {
   const container = document.getElementById('categories-list');
-  // Оставляем кнопку «Все»
   const allBtn = container.querySelector('[data-id="all"]');
   container.innerHTML = '';
   container.appendChild(allBtn);
@@ -177,7 +170,6 @@ function renderCategories() {
     container.appendChild(btn);
   });
 
-  // Заполняем select в форме добавления товара
   const select = document.getElementById('new-category');
   if (select) {
     select.innerHTML = '<option value="" disabled selected>Выберите категорию...</option>';
@@ -222,13 +214,22 @@ function buildProductCard(p) {
     ? `<img class="product-img" src="${escHtml(p.image_url)}" alt="${escHtml(p.name)}" onerror="this.parentElement.innerHTML=noImageHtml()" loading="lazy" />`
     : `<div class="product-img-placeholder"><span>📦</span><span>FunShop Premium</span></div>`;
 
-  const actionHtml = qty > 0
-    ? `<div class="qty-counter">
-         <button class="qty-btn" onclick="updateQty(${p.id}, -1)">−</button>
-         <span class="qty-value">${qty}</span>
-         <button class="qty-btn" onclick="updateQty(${p.id}, 1)">+</button>
-       </div>`
-    : `<button class="btn-add" onclick="addToCart(${p.id})">+</button>`;
+  let actionHtml = "";
+  if (isStaff()) {
+    actionHtml = `
+      <div class="staff-actions">
+        <button class="btn-edit" onclick="editProduct(${p.id})">✏️</button>
+        <button class="btn-delete" onclick="deleteProduct(${p.id})">🗑</button>
+      </div>`;
+  } else {
+    actionHtml = qty > 0
+      ? `<div class="qty-counter">
+           <button class="qty-btn" onclick="updateQty(${p.id}, -1)">−</button>
+           <span class="qty-value">${qty}</span>
+           <button class="qty-btn" onclick="updateQty(${p.id}, 1)">+</button>
+         </div>`
+      : `<button class="btn-add" onclick="addToCart(${p.id})">+</button>`;
+  }
 
   return `
     <div class="product-card" id="card-${p.id}">
@@ -252,7 +253,7 @@ function noImageHtml() {
 
 /* ═══════════════════════════════════════════════════════
    КОРЗИНА
-═══════════════════════════════════════════════════════ */
+   ═══════════════════════════════════════════════════════ */
 function getItemQty(productId) {
   return state.cart.find(i => i.product_id === productId)?.quantity || 0;
 }
@@ -269,13 +270,12 @@ function addToCart(productId) {
   }
   triggerHaptic('success');
   updateCartFab();
-  // Перерисовываем только карточку
+  
   const card = document.getElementById(`card-${productId}`);
   if (card) {
     const footer = card.querySelector('.product-footer');
     if (footer) {
       footer.querySelector('.btn-add, .qty-counter').outerHTML = buildProductCard(product).match(/(<div class="qty-counter">[\s\S]*?<\/div>|<button class="btn-add"[^>]*>[^<]*<\/button>)/)?.[0] || '';
-      // Перерисовываем карточку через обновление сетки
       renderProducts();
     }
   }
@@ -292,7 +292,6 @@ function updateQty(productId, delta) {
   updateCartFab();
   renderProducts();
 
-  // Если открыта корзина — обновляем её
   if (!document.getElementById('cart-modal').classList.contains('hidden')) {
     renderCartItems();
     updateCartTotals();
@@ -332,7 +331,7 @@ function updateCartFab() {
 
 /* ═══════════════════════════════════════════════════════
    КОРЗИНА — МОДАЛКА
-═══════════════════════════════════════════════════════ */
+   ═══════════════════════════════════════════════════════ */
 function openCart() {
   renderCartItems();
   updateCartTotals();
@@ -396,7 +395,7 @@ function updateCheckoutBtn() {
 
 /* ═══════════════════════════════════════════════════════
    ОФОРМЛЕНИЕ ЗАКАЗА
-═══════════════════════════════════════════════════════ */
+   ═══════════════════════════════════════════════════════ */
 async function submitOrder() {
   if (state.isSubmitting) return;
   const btn = document.getElementById('checkout-btn');
@@ -427,22 +426,9 @@ async function submitOrder() {
     user: state.user,
   };
 
-  console.log("WebApp sendData fired, payload:", payload);
-  console.log(payload);
+  console.log("WebApp order checkout triggered, payload:", payload);
 
-  if (window.Telegram?.WebApp) {
-    try {
-      window.Telegram.WebApp.sendData(JSON.stringify(payload));
-      console.log("Telegram.WebApp.sendData executed successfully");
-    } catch (err) {
-      console.error("Error in Telegram.WebApp.sendData:", err);
-    }
-    // Показываем экран успешного заказа и очищаем корзину
-    state.cart = [];
-    closeModal('cart-modal');
-    showSuccessScreen();
-  } else if (API_BASE) {
-    // Фолбэк: отправка через REST API (если бэкенд доступен)
+  if (API_BASE) {
     try {
       const res = await fetch(`${API_BASE}/api/orders`, {
         method: 'POST',
@@ -455,13 +441,21 @@ async function submitOrder() {
         closeModal('cart-modal');
         showSuccessScreen();
       } else {
-        alert('Ошибка: ' + (data.detail || 'Неизвестная ошибка'));
+        alert('Ошибка: ' + (data.detail || data.error || 'Неизвестная ошибка'));
       }
     } catch (e) {
       alert('Ошибка отправки заказа: ' + e.message);
     }
+  } else if (window.Telegram?.WebApp && window.Telegram.WebApp.sendData) {
+    try {
+      window.Telegram.WebApp.sendData(JSON.stringify(payload));
+      state.cart = [];
+      closeModal('cart-modal');
+      showSuccessScreen();
+    } catch (err) {
+      alert('Ошибка Telegram: ' + err.message);
+    }
   } else {
-    // Браузерный режим — просто показываем успех
     state.cart = [];
     closeModal('cart-modal');
     showSuccessScreen();
@@ -479,14 +473,75 @@ function showSuccessScreen() {
 
 /* ═══════════════════════════════════════════════════════
    ПАНЕЛЬ ADMIN
-═══════════════════════════════════════════════════════ */
+   ═══════════════════════════════════════════════════════ */
 function openAdminPanel() {
   if (!isStaff()) return;
   openModal('admin-modal');
 }
 
+function closeAdminModal() {
+  document.getElementById('admin-form').reset();
+  delete document.getElementById('admin-form').dataset.editId;
+  document.querySelector('#admin-modal .modal-title').textContent = '⚙️ Добавить товар';
+  document.querySelector('#admin-modal button[type="submit"]').textContent = 'Добавить товар';
+  closeModal('admin-modal');
+}
+
+function editProduct(productId) {
+  const p = state.products.find(prod => prod.id === productId);
+  if (!p) return;
+
+  document.getElementById('new-category').value = p.category_id;
+  document.getElementById('new-name').value = p.name;
+  document.getElementById('new-price').value = p.price;
+  document.getElementById('new-image').value = p.image_url;
+  document.getElementById('new-desc').value = p.description || '';
+
+  document.getElementById('admin-form').dataset.editId = productId;
+  document.querySelector('#admin-modal .modal-title').textContent = '⚙️ Редактировать товар';
+  document.querySelector('#admin-modal button[type="submit"]').textContent = 'Сохранить';
+
+  openModal('admin-modal');
+}
+
+async function deleteProduct(productId) {
+  const p = state.products.find(prod => prod.id === productId);
+  if (!p) return;
+
+  if (!confirm(`Вы действительно хотите удалить товар «${p.name}»?`)) return;
+
+  if (API_BASE) {
+    try {
+      const res = await fetch(`${API_BASE}/api/products/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          initData: tg?.initData || '',
+          id: productId,
+        }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Access denied');
+      }
+      state.products = state.products.filter(prod => prod.id !== productId);
+    } catch (e) {
+      alert('Ошибка удаления товара: ' + e.message);
+      return;
+    }
+  } else {
+    state.products = state.products.filter(prod => prod.id !== productId);
+  }
+
+  renderProducts();
+  triggerHaptic('warning');
+}
+
 async function submitNewProduct(event) {
   event.preventDefault();
+  const form = document.getElementById('admin-form');
+  const editId = form.dataset.editId ? parseInt(form.dataset.editId) : null;
+
   const categoryId = parseInt(document.getElementById('new-category').value);
   const name       = document.getElementById('new-name').value.trim();
   const price      = parseFloat(document.getElementById('new-price').value);
@@ -495,40 +550,72 @@ async function submitNewProduct(event) {
 
   if (!name || !price || !categoryId) return;
 
-  if (API_BASE) {
-    try {
-      const res = await fetch(`${API_BASE}/api/products`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          initData: tg?.initData || '',
-          category_id: categoryId,
-          name, price, image_url: imageUrl, description: desc,
-        }),
-      });
-      if (!res.ok) throw new Error('Access denied');
-      const newProd = await res.json();
-      state.products.push(newProd);
-    } catch (e) {
-      alert('Ошибка добавления товара: ' + e.message);
-      return;
+  if (editId) {
+    if (API_BASE) {
+      try {
+        const res = await fetch(`${API_BASE}/api/products/edit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            initData: tg?.initData || '',
+            id: editId,
+            category_id: categoryId,
+            name, price, image_url: imageUrl, description: desc,
+          }),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || 'Access denied');
+        }
+        const updatedProd = await res.json();
+        const idx = state.products.findIndex(p => p.id === editId);
+        if (idx !== -1) state.products[idx] = updatedProd;
+      } catch (e) {
+        alert('Ошибка изменения товара: ' + e.message);
+        return;
+      }
+    } else {
+      const idx = state.products.findIndex(p => p.id === editId);
+      if (idx !== -1) {
+        state.products[idx] = { id: editId, category_id: categoryId, name, price, image_url: imageUrl, description: desc };
+      }
     }
   } else {
-    // Локально добавляем в каталог (только для сессии)
-    const newId = Math.max(...state.products.map(p => p.id), 0) + 1;
-    state.products.push({ id: newId, category_id: categoryId, name, price, image_url: imageUrl, description: desc });
+    if (API_BASE) {
+      try {
+        const res = await fetch(`${API_BASE}/api/products`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            initData: tg?.initData || '',
+            category_id: categoryId,
+            name, price, image_url: imageUrl, description: desc,
+          }),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || 'Access denied');
+        }
+        const newProd = await res.json();
+        state.products.push(newProd);
+      } catch (e) {
+        alert('Ошибка добавления товара: ' + e.message);
+        return;
+      }
+    } else {
+      const newId = Math.max(...state.products.map(p => p.id), 0) + 1;
+      state.products.push({ id: newId, category_id: categoryId, name, price, image_url: imageUrl, description: desc });
+    }
   }
 
-  // Сбрасываем форму
-  document.getElementById('admin-form').reset();
-  closeModal('admin-modal');
+  closeAdminModal();
   renderProducts();
   triggerHaptic('success');
 }
 
 /* ═══════════════════════════════════════════════════════
    ФИЛЬТРЫ
-═══════════════════════════════════════════════════════ */
+   ═══════════════════════════════════════════════════════ */
 function selectCategory(catId, btn) {
   state.activeCategory = catId === 'all' ? 'all' : parseInt(catId);
   document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
@@ -543,7 +630,7 @@ function filterProducts() {
 
 /* ═══════════════════════════════════════════════════════
    МОДАЛЬНЫЕ ОКНА
-═══════════════════════════════════════════════════════ */
+   ═══════════════════════════════════════════════════════ */
 function openModal(id) {
   document.getElementById(id).classList.remove('hidden');
 }
@@ -553,7 +640,10 @@ function closeModal(id) {
 }
 
 function closeOnBackdrop(event, modalId) {
-  if (event.target.id === modalId) closeModal(modalId);
+  if (event.target.id === modalId) {
+    if (modalId === 'admin-modal') closeAdminModal();
+    else closeModal(modalId);
+  }
 }
 
 function closeApp() {
@@ -563,7 +653,7 @@ function closeApp() {
 
 /* ═══════════════════════════════════════════════════════
    УТИЛИТЫ
-═══════════════════════════════════════════════════════ */
+   ═══════════════════════════════════════════════════════ */
 function formatPrice(val) {
   return parseFloat(val).toLocaleString('ru-RU') + ' ₸';
 }
@@ -585,7 +675,7 @@ function escHtml(str) {
 
 /* ═══════════════════════════════════════════════════════
    ИНИЦИАЛИЗАЦИЯ
-═══════════════════════════════════════════════════════ */
+   ═══════════════════════════════════════════════════════ */
 async function init() {
   initTelegram();
   await loadConfig();

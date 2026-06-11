@@ -47,9 +47,9 @@
   <div class="promo-banner">
     <div class="promo-overlay"></div>
     <div class="promo-content">
-      <span class="promo-tag">АКЦИЯ</span>
-      <h2 class="promo-title">Привозим премиальные вкусы прямо на дом!</h2>
-      <p class="promo-sub">Быстрая доставка по городу и за город</p>
+      <span class="promo-tag">НАШ КАНАЛ</span>
+      <h2 class="promo-title" style="margin-bottom: 5px;">Официальный Telegram-канал</h2>
+      <p class="promo-sub" style="font-size: 18px; font-weight: 700; color: #00ffff;"><a href="https://t.me/FunShopGG" target="_blank" style="color: inherit; text-decoration: none;">@FunShopGG</a></p>
     </div>
   </div>
 
@@ -199,7 +199,7 @@
   <div class="modal-sheet">
     <div class="modal-header">
       <h2 class="modal-title">⚙️ Добавить товар</h2>
-      <button class="modal-close" onclick="closeModal('admin-modal')">✕</button>
+      <button class="modal-close" onclick="closeAdminModal()">✕</button>
     </div>
 
     <form id="admin-form" onsubmit="submitNewProduct(event)" class="admin-form">
@@ -231,7 +231,7 @@
       </div>
 
       <div class="form-actions">
-        <button type="button" class="btn-secondary" onclick="closeModal('admin-modal')">Отмена</button>
+        <button type="button" class="btn-secondary" onclick="closeAdminModal()">Отмена</button>
         <button type="submit" class="btn-primary">Добавить товар</button>
       </div>
     </form>
