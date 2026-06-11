@@ -116,8 +116,12 @@ async function loadCatalog() {
   if (API_BASE) {
     try {
       const [catRes, prodRes] = await Promise.all([
-        fetch(`${API_BASE}/api/categories?_=${Date.now()}`),
-        fetch(`${API_BASE}/api/products?_=${Date.now()}`),
+        fetch(`${API_BASE}/api/categories?_=${Date.now()}`, {
+          headers: { "ngrok-skip-browser-warning": "69420" }
+        }),
+        fetch(`${API_BASE}/api/products?_=${Date.now()}`, {
+          headers: { "ngrok-skip-browser-warning": "69420" }
+        }),
       ]);
       state.categories = await catRes.json();
       state.products   = await prodRes.json();
@@ -133,7 +137,9 @@ async function loadCatalog() {
 async function loadConfig() {
   if (!API_BASE) return;
   try {
-    const res  = await fetch(`${API_BASE}/api/config?_=${Date.now()}`);
+    const res  = await fetch(`${API_BASE}/api/config?_=${Date.now()}`, {
+      headers: { "ngrok-skip-browser-warning": "69420" }
+    });
     const data = await res.json();
     if (data.admin_ids)   state.adminIds   = data.admin_ids;
     if (data.manager_ids) state.managerIds = data.manager_ids;
