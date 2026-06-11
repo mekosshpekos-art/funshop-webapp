@@ -35,6 +35,8 @@
     <div class="header-actions">
       <!-- Кнопка Admin Panel (только для staff) -->
       <button id="admin-btn" class="btn-icon btn-purple hidden" onclick="openAdminPanel()" title="Панель управления">⚙️</button>
+      <!-- Кнопка Техподдержки -->
+      <a id="support-btn" class="btn-icon btn-support" href="https://t.me/ВСТАВЬ_USERNAME" target="_blank" title="Написать в поддержку">🆘</a>
       <!-- Имя пользователя -->
       <div class="user-badge">
         <span class="user-dot"></span>
@@ -94,6 +96,12 @@
     </div>
     <span class="cart-fab-price" id="cart-fab-price">0 ₸</span>
   </div>
+
+  <!-- ПЛАВАЮЩАЯ КНОПКА ТЕХПОДДЕРЖКИ -->
+  <a class="support-fab" id="support-fab" href="https://t.me/ВСТАВЬ_USERNAME" target="_blank">
+    <span class="support-fab-icon">🆘</span>
+    <span class="support-fab-text">Поддержка</span>
+  </a>
 
 </div><!-- #app -->
 
@@ -221,8 +229,16 @@
       </div>
 
       <div class="field-group">
-        <label class="field-label">URL изображения (необязательно)</label>
-        <input type="url" id="new-image" class="field-input" placeholder="https://..." />
+        <label class="field-label">Фото товара</label>
+        <div class="upload-zone" id="upload-zone">
+          <input type="file" id="new-image-file" accept="image/*" class="hidden-input" />
+          <div class="upload-placeholder" id="upload-placeholder">
+            <span class="upload-icon">📸</span>
+            <span class="upload-text">Нажмите для выбора фото</span>
+          </div>
+          <img id="upload-preview" class="upload-preview hidden" src="" alt="Превью" />
+          <button type="button" id="btn-remove-photo" class="btn-remove-photo hidden">✕</button>
+        </div>
       </div>
 
       <div class="field-group">

@@ -9,7 +9,7 @@
    КОНФИГУРАЦИЯ (URL бэкенда — если используется)
    Если WebApp на GitHub Pages, данные берутся из CATALOG ниже
    ═══════════════════════════════════════════════════════ */
-const API_BASE = "https://prevail-blah-shrubbery.ngrok-free.dev";
+const API_BASE = window.location.hostname.endsWith("github.io") ? "https://prevail-blah-shrubbery.ngrok-free.dev" : (window.location.origin && window.location.origin !== "null" && !window.location.origin.startsWith("file://") ? window.location.origin : "");
 
 /* ═══════════════════════════════════════════════════════
    ВСТРОЕННЫЙ КАТАЛОГ (перенесён из старого проекта)
@@ -137,6 +137,15 @@ async function loadConfig() {
     const data = await res.json();
     if (data.admin_ids)   state.adminIds   = data.admin_ids;
     if (data.manager_ids) state.managerIds = data.manager_ids;
+
+    // Подставляем username бота поддержки в кнопки
+    if (data.support_bot_username) {
+      const supportUrl = `https://t.me/${data.support_bot_username}`;
+      const supportBtnHeader = document.getElementById('support-btn');
+      const supportFab       = document.getElementById('support-fab');
+      if (supportBtnHeader) supportBtnHeader.href = supportUrl;
+      if (supportFab)       supportFab.href       = supportUrl;
+    }
   } catch (e) {
     console.warn('Конфиг не загружен, используем встроенные ID');
   }
@@ -479,11 +488,69 @@ function openAdminPanel() {
   openModal('admin-modal');
 }
 
+let currentPhotoBase64 = "";
+
+function setUploadPreview(src) {
+  currentPhotoBase64 = src;
+  const preview = document.getElementById('upload-preview');
+  const placeholder = document.getElementById('upload-placeholder');
+  const removeBtn = document.getElementById('btn-remove-photo');
+  
+  if (src) {
+    preview.src = src;
+    preview.classList.remove('hidden');
+    placeholder.classList.add('hidden');
+    removeBtn.classList.remove('hidden');
+  } else {
+    preview.src = "";
+    preview.classList.add('hidden');
+    placeholder.classList.remove('hidden');
+    removeBtn.classList.add('hidden');
+  }
+}
+
+function clearUploadZone() {
+  setUploadPreview("");
+  const fileInput = document.getElementById('new-image-file');
+  if (fileInput) fileInput.value = "";
+}
+
+function initPhotoUpload() {
+  const fileInput = document.getElementById('new-image-file');
+  if (!fileInput) return;
+
+  fileInput.addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      alert('Пожалуйста, выберите изображение');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(event) {
+      setUploadPreview(event.target.result);
+    };
+    reader.readAsDataURL(file);
+  });
+
+  const removeBtn = document.getElementById('btn-remove-photo');
+  if (removeBtn) {
+    removeBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      clearUploadZone();
+    });
+  }
+}
+
 function closeAdminModal() {
   document.getElementById('admin-form').reset();
   delete document.getElementById('admin-form').dataset.editId;
   document.querySelector('#admin-modal .modal-title').textContent = '⚙️ Добавить товар';
   document.querySelector('#admin-modal button[type="submit"]').textContent = 'Добавить товар';
+  clearUploadZone();
   closeModal('admin-modal');
 }
 
@@ -494,7 +561,7 @@ function editProduct(productId) {
   document.getElementById('new-category').value = p.category_id;
   document.getElementById('new-name').value = p.name;
   document.getElementById('new-price').value = p.price;
-  document.getElementById('new-image').value = p.image_url;
+  setUploadPreview(p.image_url || "");
   document.getElementById('new-desc').value = p.description || '';
 
   document.getElementById('admin-form').dataset.editId = productId;
@@ -524,7 +591,8 @@ async function deleteProduct(productId) {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || 'Access denied');
       }
-      state.products = state.products.filter(prod => prod.id !== productId);
+      // Перезагружаем каталог с сервера для синхронизации у всех
+      await loadCatalog();
     } catch (e) {
       alert('Ошибка удаления товара: ' + e.message);
       return;
@@ -540,15 +608,29 @@ async function deleteProduct(productId) {
 async function submitNewProduct(event) {
   event.preventDefault();
   const form = document.getElementById('admin-form');
+  const submitBtn = form.querySelector('button[type="submit"]');
   const editId = form.dataset.editId ? parseInt(form.dataset.editId) : null;
 
   const categoryId = parseInt(document.getElementById('new-category').value);
   const name       = document.getElementById('new-name').value.trim();
   const price      = parseFloat(document.getElementById('new-price').value);
-  const imageUrl   = document.getElementById('new-image').value.trim();
+  const imageUrl   = currentPhotoBase64;
   const desc       = document.getElementById('new-desc').value.trim();
 
-  if (!name || !price || !categoryId) return;
+  if (!name || !price || !categoryId) {
+    alert('Заполните название, цену и категорию!');
+    return;
+  }
+
+  // Индикатор загрузки
+  const originalText = submitBtn.textContent;
+  submitBtn.textContent = '⏳ Загрузка...';
+  submitBtn.disabled = true;
+
+  const resetBtn = () => {
+    submitBtn.textContent = originalText;
+    submitBtn.disabled = false;
+  };
 
   if (editId) {
     if (API_BASE) {
@@ -563,15 +645,13 @@ async function submitNewProduct(event) {
             name, price, image_url: imageUrl, description: desc,
           }),
         });
+        const resData = await res.json().catch(() => ({}));
         if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error || 'Access denied');
+          throw new Error(resData.error || `Ошибка ${res.status}`);
         }
-        const updatedProd = await res.json();
-        const idx = state.products.findIndex(p => p.id === editId);
-        if (idx !== -1) state.products[idx] = updatedProd;
       } catch (e) {
-        alert('Ошибка изменения товара: ' + e.message);
+        resetBtn();
+        alert('❌ Ошибка изменения товара:\n' + e.message);
         return;
       }
     } else {
@@ -592,14 +672,13 @@ async function submitNewProduct(event) {
             name, price, image_url: imageUrl, description: desc,
           }),
         });
+        const resData = await res.json().catch(() => ({}));
         if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error || 'Access denied');
+          throw new Error(resData.error || `Ошибка ${res.status}`);
         }
-        const newProd = await res.json();
-        state.products.push(newProd);
       } catch (e) {
-        alert('Ошибка добавления товара: ' + e.message);
+        resetBtn();
+        alert('❌ Ошибка добавления товара:\n' + e.message);
         return;
       }
     } else {
@@ -608,6 +687,10 @@ async function submitNewProduct(event) {
     }
   }
 
+  // Перезагружаем каталог с сервера, чтобы все пользователи видели актуальные товары
+  if (API_BASE) await loadCatalog();
+
+  resetBtn();
   closeAdminModal();
   renderProducts();
   triggerHaptic('success');
@@ -686,6 +769,7 @@ async function init() {
   renderCategories();
   renderProducts();
   updateCartFab();
+  initPhotoUpload();
 
   // Инициализируем доставку
   selectDelivery('city', 700);
